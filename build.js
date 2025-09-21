@@ -19,6 +19,11 @@ const assetsToCopy = [
   'src/assets/YOLOv8-Segmentation.onnx'
 ];
 
+// Copy worker files maintaining directory structure
+const workersToCopy = [
+  { src: 'src/Worker/processor.worker.js', dest: 'dist/src/Worker/processor.worker.js' }
+];
+
 assetsToCopy.forEach(asset => {
   const src = asset;
   const dest = path.join('dist', path.basename(asset));
@@ -28,6 +33,19 @@ assetsToCopy.forEach(asset => {
     console.log(`Copied ${src} to ${dest}`);
   } else {
     console.warn(`Warning: ${src} not found, skipping...`);
+  }
+});
+
+// Copy worker files maintaining directory structure
+workersToCopy.forEach(({ src, dest }) => {
+  if (fs.existsSync(src)) {
+    // Ensure destination directory exists
+    const destDir = path.dirname(dest);
+    fs.mkdirSync(destDir, { recursive: true });
+    fs.copyFileSync(src, dest);
+    console.log(`Copied worker ${src} to ${dest}`);
+  } else {
+    console.warn(`Warning: Worker ${src} not found, skipping...`);
   }
 });
 
