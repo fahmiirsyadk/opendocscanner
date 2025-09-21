@@ -9,6 +9,7 @@ if (!fs.existsSync('dist')) {
 
 // Copy static assets
 const assetsToCopy = [
+  'index.html',
   'styles.css',
   'src/assets/opencv/opencv.js',
   'src/assets/pdf-lib.min.js',
