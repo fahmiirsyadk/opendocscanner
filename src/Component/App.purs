@@ -31,6 +31,7 @@ import FFI.Worker as W
 import Halogen.Subscription as HS
 import FFI.CanvasDraw (drawImageToCanvas)
 import FFI.EditOverlay as EO
+import FFI.PDFExport as PDF
 import Routing.Duplex (RouteDuplex', root)
 import Routing.Duplex as RD
 import Routing.Duplex.Generic as RG
@@ -85,6 +86,7 @@ data Action
   | EditPointerDown ME.MouseEvent
   | EditPointerMove ME.MouseEvent
   | EditPointerUp ME.MouseEvent
+  | ExportPDF
 
 data Route = Home | Chat | Tools | About
 
@@ -244,6 +246,11 @@ component =
       case st.editing of
         Nothing -> pure unit
         Just ed -> H.modify_ \s -> s { editing = Just ed { dragging = Nothing } }
+    ExportPDF -> do
+      st <- H.get
+      let pages = map (\i -> { canvasSelector: "#result-canvas-" <> show i }) (Array.range 1 st.resultCount)
+      H.liftEffect $ PDF.exportPdf pages
+      pure unit
 
   handleFilesChanged :: Event -> HalogenM State Action () o m Unit
   handleFilesChanged ev = do
@@ -351,6 +358,15 @@ component =
             ]
         else HH.text ""
       , if state.resultCount > 0 then
+          HH.div [ HP.class_ (HH.ClassName "process-cta") ]
+            [ HH.button
+                [ HP.classes [ HH.ClassName "process-button" ]
+                , HE.onClick \_ -> ExportPDF
+                ]
+                [ HH.text "Export PDF" ]
+            ]
+        else HH.text ""
+      , if state.resultCount > 0 then
           HH.div [ HP.class_ (HH.ClassName "results") ]
             (renderResultItem <$> Array.range 1 state.resultCount)
         else HH.text ""
@@ -435,12 +451,14 @@ component =
                     ]
                 ]
             , HH.div [ HP.class_ (HH.ClassName "editor-body") ]
-                [ HH.canvas [ HP.id "editor-base-canvas", HP.class_ (HH.ClassName "edit-base"), HP.width ed.width, HP.height ed.height ]
-                , HH.canvas [ HP.id "editor-overlay-canvas", HP.class_ (HH.ClassName "edit-overlay"), HP.width ed.width, HP.height ed.height
-                            , HE.onMouseDown EditPointerDown
-                            , HE.onMouseMove EditPointerMove
-                            , HE.onMouseUp EditPointerUp
-                            ]
+                [ HH.div [ HP.class_ (HH.ClassName "editor-canvas-wrap") ]
+                    [ HH.canvas [ HP.id "editor-base-canvas", HP.class_ (HH.ClassName "edit-base"), HP.width ed.width, HP.height ed.height ]
+                    , HH.canvas [ HP.id "editor-overlay-canvas", HP.class_ (HH.ClassName "edit-overlay"), HP.width ed.width, HP.height ed.height
+                                , HE.onMouseDown EditPointerDown
+                                , HE.onMouseMove EditPointerMove
+                                , HE.onMouseUp EditPointerUp
+                                ]
+                    ]
                 ]
             ]
         ]
