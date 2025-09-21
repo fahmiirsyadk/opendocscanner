@@ -1,6 +1,14 @@
 // Minimal message protocol: { id, url, name, op?: 'grayscale' | 'warp' | 'passthrough', points?: [...8 points...] }
 async function ensureCvReady() {
-  try { self.importScripts('../assets/opencv/opencv.js'); } catch (_) {}
+  try { 
+    // Try production path first (from dist/src/Worker/ to dist/opencv.js)
+    self.importScripts('../../opencv.js'); 
+  } catch (_) {
+    try { 
+      // Fallback to development path
+      self.importScripts('../assets/opencv/opencv.js'); 
+    } catch (_) {}
+  }
   if (typeof cv !== 'undefined' && typeof cv.Mat === 'function') return;
   await new Promise((resolve) => {
     if (typeof cv !== 'undefined' && cv && typeof cv.onRuntimeInitialized === 'function') {
