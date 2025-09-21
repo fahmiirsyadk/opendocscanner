@@ -9,6 +9,22 @@
 <body>
     <div id="app"></div>
 
-    <script type="module" src="loader.js"></script>
+    <!-- Production bundle -->
+    <script type="module" src="bundle.min.js"></script>
+
+    <!-- Development mode fallback (only loads in development) -->
+    <script>
+        // Check if we're in development mode by looking for bundle.min.js
+        // If it fails to load, we'll fall back to development version
+        window.addEventListener('error', function(e) {
+            if (e.target.src && e.target.src.includes('bundle.min.js')) {
+                // Load development version as fallback
+                const script = document.createElement('script');
+                script.type = 'module';
+                script.src = 'loader.js';
+                document.head.appendChild(script);
+            }
+        }, true);
+    </script>
 </body>
 </html>
