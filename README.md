@@ -38,36 +38,65 @@ This project uses the following PureScript packages:
 
 - PureScript compiler (`purs`)
 - Spago package manager
-- Node.js and npm (for building)
+- Node.js and npm (for building and bundling)
 
 ### Installation
 
 1. **Install dependencies**:
    ```bash
+   npm install
    spago install
    ```
 
-2. **Build the project**:
+2. **Development build**:
    ```bash
-   spago build
+   npm run build
    ```
 
-3. **Open the application**:
-   Open `index.html` in your web browser.
+3. **Production build**:
+   ```bash
+   npm run build:prod
+   ```
+
+4. **Serve locally**:
+   ```bash
+   npm run serve
+   ```
+   Then open `http://localhost:8080` in your browser.
 
 ### Development
 
 For development with auto-rebuilding:
 
 ```bash
-# Terminal 1: Build and watch for changes
-spago build --watch
-
-# Terminal 2: Serve files (optional)
-python -m http.server 8000
+npm run dev
 ```
 
-Then open `http://localhost:8000` in your browser.
+This will watch for PureScript file changes and rebuild automatically.
+
+### Deployment to Vercel
+
+1. **Install Vercel CLI** (if not already installed):
+   ```bash
+   npm install -g vercel
+   ```
+
+2. **Deploy to Vercel**:
+   ```bash
+   vercel --prod
+   ```
+
+   Or push to your git repository and connect it to Vercel for automatic deployments.
+
+### Available Scripts
+
+- `npm run build` - Build for development (with source maps)
+- `npm run build:prod` - Build for production (minified)
+- `npm run bundle` - Bundle JavaScript files only
+- `npm run minify` - Minify the bundle
+- `npm run dev` - Development mode with file watching
+- `npm run clean` - Clean build artifacts
+- `npm run serve` - Start local development server
 
 ## Usage
 
