@@ -302,7 +302,7 @@ component =
     About -> HH.div [ HP.class_ (HH.ClassName "center") ]
               [ HH.div [ HP.class_ (HH.ClassName "card") ]
                   [ HH.h2_ [ HH.text "About" ]
-                  , HH.p_ [ HH.text "PureScanner — document scanning & image manipulation." ]
+                  , HH.p_ [ HH.text "OpenDocScanner — document scanning & image manipulation." ]
                   ]
               ]
 
@@ -376,7 +376,7 @@ component =
   navbar =
     HH.nav [ HP.class_ (HH.ClassName "navbar") ]
       [ HH.div [ HP.class_ (HH.ClassName "nav-left") ]
-          [ HH.a [ HP.href "#/", HP.class_ (HH.ClassName "brand") ] [ HH.text "PureScanner" ] ]
+          [ HH.a [ HP.href "#/", HP.class_ (HH.ClassName "brand") ] [ HH.text "OpenDocScanner" ] ]
       , HH.ul [ HP.class_ (HH.ClassName "nav-center") ]
           [ HH.li_ [ linkItem "#/chat" "Chat", badgeAlpha ]
           , HH.li_ [ linkItem "#/tools" "Tools" ]

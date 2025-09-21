@@ -1,5 +1,5 @@
 {
-  "name": "purescanner",
+  "name": "opendocscanner",
   "version": "1.0.0",
   "description": "PureScript document scanner and image manipulation tool",
   "scripts": {

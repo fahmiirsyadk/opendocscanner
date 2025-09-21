@@ -1,4 +1,4 @@
-# PureScanner
+# OpenDocScanner
 
 A PureScript-based Single Page Application (SPA) for document scanning and image manipulation using Halogen and HTML5 Canvas.
 
