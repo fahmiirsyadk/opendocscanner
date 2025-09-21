@@ -2,7 +2,17 @@
 
 export function spawn(scriptUrl) {
   return function () {
-    return new Worker(scriptUrl);
+    // Ensure absolute URL so SPA routing doesn't rewrite to index.html
+    try {
+      const absolute = new URL(scriptUrl, window.location.origin).toString();
+      return new Worker(absolute);
+    } catch (_) {
+      // Fallback: prefix with "/" if needed
+      const normalized = scriptUrl.startsWith('/')
+        ? scriptUrl
+        : '/' + scriptUrl.replace(/^\.?\//, '');
+      return new Worker(normalized);
+    }
   };
 }
 
