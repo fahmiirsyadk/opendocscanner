@@ -1,0 +1,8 @@
+{
+  "devDependencies": {
+    "spago": "^0.21.0"
+  },
+  "dependencies": {
+    "pdfjs-dist": "^5.4.149"
+  }
+}
