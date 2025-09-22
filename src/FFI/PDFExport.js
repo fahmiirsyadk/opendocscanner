@@ -4,7 +4,8 @@ export function exportPdf(pages) {
     if (typeof window !== 'undefined' && !window.PDFLib) {
       await new Promise((resolve, reject) => {
         const s = document.createElement('script');
-        s.src = './src/assets/pdf-lib.min.js';
+        // Load from built artifact at /pdf-lib.min.js to avoid SPA rewrites
+        s.src = '/pdf-lib.min.js';
         s.onload = resolve; s.onerror = reject; document.head.appendChild(s);
       });
     }

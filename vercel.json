@@ -7,6 +7,7 @@
   "rewrites": [
     { "source": "/bundle.min.js", "destination": "/bundle.min.js" },
     { "source": "/bundle.js", "destination": "/bundle.js" },
+    { "source": "/pdf-lib.min.js", "destination": "/pdf-lib.min.js" },
     { "source": "/opencv.js", "destination": "/opencv.js" },
     { "source": "/pdf.mjs", "destination": "/pdf.mjs" },
     { "source": "/pdf.worker.mjs", "destination": "/pdf.worker.mjs" },
@@ -14,5 +15,23 @@
     { "source": "/src/Worker/processor.worker.js", "destination": "/src/Worker/processor.worker.js" },
     { "source": "/index.html", "destination": "/index.html" },
     { "source": "/(.*)", "destination": "/index.html" }
+  ],
+  "headers": [
+    {
+      "source": "/opencv.js",
+      "headers": [ { "key": "Cache-Control", "value": "public, max-age=31536000, immutable" } ]
+    },
+    {
+      "source": "/pdf-lib.min.js",
+      "headers": [ { "key": "Cache-Control", "value": "public, max-age=31536000, immutable" } ]
+    },
+    {
+      "source": "/pdf.mjs",
+      "headers": [ { "key": "Cache-Control", "value": "public, max-age=31536000, immutable" } ]
+    },
+    {
+      "source": "/pdf.worker.mjs",
+      "headers": [ { "key": "Cache-Control", "value": "public, max-age=31536000, immutable" } ]
+    }
   ]
 }
