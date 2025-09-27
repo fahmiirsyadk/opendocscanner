@@ -1,33 +1,14 @@
-// Minimal message protocol: { id, url, name, op?: 'grayscale' | 'warp' | 'passthrough', points?: [...8 points...] }
-const OPENCV_CANDIDATES = (() => {
-  const urls = ['/opencv.js'];
-  try {
-    const base = new URL('./', self.location.href);
-    urls.push(new URL('../assets/opencv/opencv.js', base).toString());
-  } catch (_) {
-    urls.push('../assets/opencv/opencv.js');
-  }
-  return Array.from(new Set(urls));
-})();
-
-function tryLoadOpenCv() {
-  for (const candidate of OPENCV_CANDIDATES) {
-    try {
-      importScripts(candidate);
-      if (typeof cv !== 'undefined' && typeof cv.Mat === 'function') {
-        return true;
-      }
-    } catch (_) {
-      // try next candidate
-    }
-  }
-  return typeof cv !== 'undefined' && typeof cv.Mat === 'function';
-}
-
+// message protocol: { id, url, name, op?: 'grayscale' | 'warp' | 'passthrough', points?: [...8 points...] }
+let cvReady = false;
 async function ensureCvReady() {
-  if (typeof cv !== 'undefined' && typeof cv.Mat === 'function') return;
-  tryLoadOpenCv();
-  if (typeof cv !== 'undefined' && typeof cv.Mat === 'function') return;
+  if (cvReady) return;
+  try {
+    importScripts('/opencv.js');
+  } catch (err) {
+    console.error('Failed to load opencv.js', err);
+    throw new Error('OpenCV script could not be loaded.');
+  }
+
   await new Promise((resolve) => {
     if (typeof cv !== 'undefined' && cv && typeof cv.onRuntimeInitialized === 'function') {
       const prev = cv.onRuntimeInitialized;
@@ -39,6 +20,7 @@ async function ensureCvReady() {
       }, 10);
     }
   });
+  cvReady = true;
 }
 
 self.distance = function distance(a, b) { return Math.hypot(a.x - b.x, a.y - b.y); };

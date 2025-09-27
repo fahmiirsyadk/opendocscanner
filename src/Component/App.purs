@@ -5,12 +5,10 @@ import Prelude
 import Effect.Console (log)
 import Halogen as H
 import Halogen.Query (HalogenM)
-import Effect.Class (class MonadEffect)
 import Halogen.HTML as HH
 import Halogen.HTML.Properties as HP
 import Halogen.HTML.Events as HE
 import Web.UIEvent.MouseEvent as ME
-import Web.Event.Event (Event)
 import Web.Event.Event (Event, target)
 import Web.HTML.HTMLInputElement as Input
 import Web.File.File (name, type_, toBlob)
@@ -21,8 +19,6 @@ import DOM.HTML.Indexed.InputAcceptType as Accept
 import Data.MediaType (MediaType(..))
 import Data.String as Str
 import Web.File.Url as Url
-import Web.File.Blob as Blob
-import Effect.Aff (delay, Milliseconds(..))
 import Effect.Aff.Class (class MonadAff)
 import Data.Foldable (for_)
 import Halogen.Query.HalogenM as HQ
@@ -39,7 +35,6 @@ import Data.Generic.Rep (class Generic)
 import Routing.Hash as Hash
 import Data.Either (Either(..))
 import Data.Number (sqrt)
--- Removed noise effect
 
 type UploadItem =
   { name :: String

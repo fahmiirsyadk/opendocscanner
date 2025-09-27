@@ -3,7 +3,7 @@
 export function spawn(scriptUrl) {
   return function () {
     const url = scriptUrl.startsWith('/') ? scriptUrl : `/${scriptUrl.replace(/^\.?\//, '')}`;
-    return new Worker(url, { type: 'module' });
+    return new Worker(url);
   };
 }
 
