@@ -3,19 +3,18 @@
   "version": "1.0.0",
   "description": "PureScript document scanner and image manipulation tool",
   "scripts": {
-    "build": "npx purs --version && spago build && npm run bundle",
-    "bundle": "node build.js",
-    "build:prod": "npx purs --version && spago build && NODE_ENV=production npm run bundle && npm run minify",
-    "minify": "terser dist/bundle.js -o dist/bundle.min.js --compress --mangle",
-    "dev": "npx purs --version && spago build --watch",
-    "clean": "rm -rf dist output",
-    "serve": "python3 -m http.server 8080"
+    "dev:ps": "spago build --watch --clear",
+    "dev": "run-p dev:ps vite",
+    "build": "node build.js",
+    "preview": "vite preview",
+    "clean": "rm -rf dist output"
   },
   "devDependencies": {
+    "npm-run-all": "^4.1.5",
+    "purescript": "^0.15.15",
     "spago": "^0.21.0",
-    "esbuild": "^0.19.0",
-    "terser": "^5.24.0",
-    "purescript": "^0.15.15"
+    "vite": "^7.1.7",
+    "vite-plugin-static-copy": "^3.1.2"
   },
   "dependencies": {
     "pdfjs-dist": "^5.4.149"

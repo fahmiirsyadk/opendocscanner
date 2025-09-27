@@ -1,20 +1,12 @@
 {
-  "buildCommand": "npm run build:prod",
+  "buildCommand": "npm run build",
   "outputDirectory": "dist",
-  "framework": null,
+  "framework": "vite",
   "installCommand": "npm install",
   "devCommand": "npm run dev",
-  "rewrites": [
-    { "source": "/bundle.min.js", "destination": "/bundle.min.js" },
-    { "source": "/bundle.js", "destination": "/bundle.js" },
-    { "source": "/pdf-lib.min.js", "destination": "/pdf-lib.min.js" },
-    { "source": "/opencv.js", "destination": "/opencv.js" },
-    { "source": "/pdf.mjs", "destination": "/pdf.mjs" },
-    { "source": "/pdf.worker.mjs", "destination": "/pdf.worker.mjs" },
-    { "source": "/styles.css", "destination": "/styles.css" },
-    { "source": "/src/Worker/processor.worker.js", "destination": "/src/Worker/processor.worker.js" },
-    { "source": "/index.html", "destination": "/index.html" },
-    { "source": "/(.*)", "destination": "/index.html" }
+  "routes": [
+    { "handle": "filesystem" },
+    { "src": "/(.*)", "dest": "/index.html" }
   ],
   "headers": [
     {

@@ -375,12 +375,15 @@ component =
   navbar :: forall m1. H.ComponentHTML Action () m1
   navbar =
     HH.nav [ HP.class_ (HH.ClassName "navbar") ]
-      [ HH.div [ HP.class_ (HH.ClassName "nav-left") ]
-          [ HH.a [ HP.href "#/", HP.class_ (HH.ClassName "brand") ] [ HH.text "OpenDocScanner" ] ]
-      , HH.ul [ HP.class_ (HH.ClassName "nav-center") ]
-          [ HH.li_ [ linkItem "#/chat" "Chat", badgeAlpha ]
-          , HH.li_ [ linkItem "#/tools" "Tools" ]
-          , HH.li_ [ linkItem "#/about" "About" ]
+      [ HH.div [ HP.class_ (HH.ClassName "navbar-inner") ]
+          [ HH.div [ HP.class_ (HH.ClassName "nav-left") ]
+              [ HH.a [ HP.href "#/", HP.class_ (HH.ClassName "brand") ] [ HH.text "OpenDocScanner" ] ]
+          , HH.ul [ HP.class_ (HH.ClassName "nav-center") ]
+              [ HH.li_ [ linkItem "#/chat" "Chat", badgeAlpha ]
+              , HH.li_ [ linkItem "#/tools" "Tools" ]
+              , HH.li_ [ linkItem "#/about" "About" ]
+              ]
+          , HH.div [ HP.class_ (HH.ClassName "nav-right") ] []
           ]
       ]
 

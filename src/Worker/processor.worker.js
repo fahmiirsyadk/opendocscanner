@@ -1,14 +1,32 @@
 // Minimal message protocol: { id, url, name, op?: 'grayscale' | 'warp' | 'passthrough', points?: [...8 points...] }
-async function ensureCvReady() {
-  try { 
-    // Try production path first (from dist/src/Worker/ to dist/opencv.js)
-    self.importScripts('../../opencv.js'); 
+const OPENCV_CANDIDATES = (() => {
+  const urls = ['/opencv.js'];
+  try {
+    const base = new URL('./', self.location.href);
+    urls.push(new URL('../assets/opencv/opencv.js', base).toString());
   } catch (_) {
-    try { 
-      // Fallback to development path
-      self.importScripts('../assets/opencv/opencv.js'); 
-    } catch (_) {}
+    urls.push('../assets/opencv/opencv.js');
   }
+  return Array.from(new Set(urls));
+})();
+
+function tryLoadOpenCv() {
+  for (const candidate of OPENCV_CANDIDATES) {
+    try {
+      importScripts(candidate);
+      if (typeof cv !== 'undefined' && typeof cv.Mat === 'function') {
+        return true;
+      }
+    } catch (_) {
+      // try next candidate
+    }
+  }
+  return typeof cv !== 'undefined' && typeof cv.Mat === 'function';
+}
+
+async function ensureCvReady() {
+  if (typeof cv !== 'undefined' && typeof cv.Mat === 'function') return;
+  tryLoadOpenCv();
   if (typeof cv !== 'undefined' && typeof cv.Mat === 'function') return;
   await new Promise((resolve) => {
     if (typeof cv !== 'undefined' && cv && typeof cv.onRuntimeInitialized === 'function') {
@@ -41,50 +59,32 @@ self.onmessage = async (e) => {
     }
 
     if (op === 'grayscale') {
-      console.log('op', op);
       await ensureCvReady();
       const hasCV = (typeof cv !== 'undefined' && typeof cv.Mat === 'function');
-      console.log('hasCV', hasCV);
       if (!hasCV) { self.postMessage({ tag: 'done', id, url, name }); return; }
 
       const blob = await fetch(url).then(r => r.blob());
-      console.log('blob', blob);
-      console.log('url', url);
       const bitmap = await createImageBitmap(blob);
-      console.log('bitmap', bitmap);
       const srcCanvas = new OffscreenCanvas(bitmap.width, bitmap.height);
-      console.log('srcCanvas', srcCanvas);
       const srcCtx = srcCanvas.getContext('2d');
-      console.log('srcCtx', srcCtx);
       srcCtx.drawImage(bitmap, 0, 0);
-      console.log('srcCtx.drawImage(bitmap, 0, 0)');
 
       // Read into cv.Mat using ImageData (cv.imread may not support OffscreenCanvas)
       const imageData = srcCtx.getImageData(0, 0, bitmap.width, bitmap.height);
-      console.log('imageData', imageData);
       const src = new cv.Mat(imageData.height, imageData.width, cv.CV_8UC4);
       src.data.set(imageData.data);
-      console.log('src', src);
       const gray = new cv.Mat();
       cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY, 0);
-      console.log('gray', gray);
       // Convert back to 4-channel for PNG encoding
       const rgba = new cv.Mat();
       cv.cvtColor(gray, rgba, cv.COLOR_GRAY2RGBA, 0);
-      console.log('rgba', rgba);
-      console.log('rgba.cols', rgba.cols);
-      console.log('rgba.rows', rgba.rows);
       const outCanvas = new OffscreenCanvas(rgba.cols, rgba.rows);
-      console.log('outCanvas', outCanvas);
       const outCtx = outCanvas.getContext('2d');
       const outImageData = new ImageData(new Uint8ClampedArray(rgba.data), rgba.cols, rgba.rows);
       outCtx.putImageData(outImageData, 0, 0);
-      console.log('wrote ImageData to outCanvas');
       const outBlob = await outCanvas.convertToBlob({ type: 'image/png' });
-      console.log('outBlob', outBlob);
       // Post Blob directly (structured clone); main will createObjectURL
       self.postMessage({ tag: 'doneBlob', id, name, mime: outBlob.type, blob: outBlob });
-      console.log('self.postMessage({ tag: \'doneBlob\', id, name, mime: outBlob.type, blob: outBlob })');
       src.delete(); gray.delete(); rgba.delete();
       return;
     }
