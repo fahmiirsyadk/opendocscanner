@@ -2,39 +2,40 @@ module Component.App where
 
 import Prelude
 
-import Effect.Console (log)
-import Halogen as H
-import Halogen.Query (HalogenM)
-import Halogen.HTML as HH
-import Halogen.HTML.Properties as HP
-import Halogen.HTML.Events as HE
-import Web.UIEvent.MouseEvent as ME
-import Web.Event.Event (Event, target)
-import Web.HTML.HTMLInputElement as Input
-import Web.File.File (name, type_, toBlob)
-import Web.File.FileList (FileList, item, length)
-import Data.Maybe (Maybe(..), maybe, fromMaybe)
-import Data.Array as Array
 import DOM.HTML.Indexed.InputAcceptType as Accept
-import Data.MediaType (MediaType(..))
-import Data.String as Str
-import Web.File.Url as Url
-import Effect.Aff.Class (class MonadAff)
+import Data.Array as Array
+import Data.Either (Either(..))
 import Data.Foldable (for_)
-import Halogen.Query.HalogenM as HQ
+import Data.Generic.Rep (class Generic)
+import Data.Maybe (Maybe(..), maybe, fromMaybe)
+import Data.MediaType (MediaType(..))
+import Data.Number (sqrt)
+import Data.String as Str
 import Data.Tuple (Tuple(..))
-import FFI.Worker as W
-import Halogen.Subscription as HS
+import Effect.Aff.Class (class MonadAff)
+import Effect.Console (log)
 import FFI.CanvasDraw (drawImageToCanvas)
 import FFI.EditOverlay as EO
 import FFI.PDFExport as PDF
+import FFI.Worker as W
+import Graphics.Canvas (drawImage, getCanvasElementById)
+import Halogen as H
+import Halogen.HTML as HH
+import Halogen.HTML.Events as HE
+import Halogen.HTML.Properties as HP
+import Halogen.Query (HalogenM)
+import Halogen.Query.HalogenM as HQ
+import Halogen.Subscription as HS
 import Routing.Duplex (RouteDuplex', root)
 import Routing.Duplex as RD
 import Routing.Duplex.Generic as RG
-import Data.Generic.Rep (class Generic)
 import Routing.Hash as Hash
-import Data.Either (Either(..))
-import Data.Number (sqrt)
+import Web.Event.Event (Event, target)
+import Web.File.File (name, type_, toBlob)
+import Web.File.FileList (FileList, item, length)
+import Web.File.Url as Url
+import Web.HTML.HTMLInputElement as Input
+import Web.UIEvent.MouseEvent as ME
 
 type UploadItem =
   { name :: String
@@ -51,6 +52,7 @@ type State =
   , sources :: Array UploadItem
   , editing :: Maybe Editing
   , route :: Route
+  , worker :: Maybe W.Worker
   }
 
 type Point = { x :: Number, y :: Number }
@@ -98,7 +100,7 @@ routeCodec = root $ RG.sum
 component :: forall q i o m. MonadAff m => H.Component q i o m
 component =
   H.mkComponent
-    { initialState: \_ -> { uploads: [], isProcessing: false, resultCount: 0, pending: 0, sources: [], editing: Nothing, route: Home }
+    { initialState: \_ -> { uploads: [], isProcessing: false, resultCount: 0, pending: 0, sources: [], editing: Nothing, route: Home, worker: Nothing }
     , render
     , eval: H.mkEval $ H.defaultEval { handleAction = handleAction, initialize = Just Initialize }
     }
@@ -107,9 +109,25 @@ component =
   handleAction = case _ of
     Initialize -> do
       io <- H.liftEffect HS.create
+
+      worker <- H.liftEffect $ W.spawn "./src/Worker/processor.worker.js"
+
+      H.liftEffect $ W.onMessage worker \msg -> do
+        case msg of
+          { tag: "progress", id, progress } -> HS.notify io.listener (WorkerProgress id progress)
+          { tag: "done", id, url } -> HS.notify io.listener (WorkerDone id url)
+          { tag: "doneBlob", id, blob } -> do
+            url <- Url.createObjectURL blob
+            HS.notify io.listener (WorkerDone id url)
+          { tag: "error", id, reason } -> HS.notify io.listener (WorkerError id reason)
+          { tag: "detected", id, points, width, height } -> HS.notify io.listener (EditDetected id points width height)
+          _ -> pure unit
+
       _ <- H.subscribe io.emitter
+
+      H.modify_ \s -> s { worker = Just worker }
+
       _ <- H.liftEffect $ Hash.matchesWith (RD.parse routeCodec) \_ new -> HS.notify io.listener (Navigate new)
-      -- set initial route from current hash
       cur <- H.liftEffect Hash.getHash
       case RD.parse routeCodec cur of
         Right r -> H.modify_ \s -> s { route = r }
@@ -126,35 +144,22 @@ component =
       st <- H.get
       let count = Array.length st.uploads
       H.modify_ \s -> s { isProcessing = true, resultCount = count, pending = count, sources = s.uploads, uploads = [] }
-      -- spawn a worker per item and stream progress
-      for_ (Array.mapWithIndex Tuple st.uploads) \(Tuple ix item) -> do
-        _ <- HQ.fork do
-          worker <- H.liftEffect $ W.spawn "./src/Worker/processor.worker.js"
-          io <- H.liftEffect HS.create
-          -- bridge worker -> actions
-          H.liftEffect $ W.onMessage worker \msg -> do
-            case msg of
-              { tag: "progress", id, progress } -> HS.notify io.listener (WorkerProgress id progress)
-              { tag: "done", id, url } -> HS.notify io.listener (WorkerDone id url)
-              { tag: "doneBlob", id, blob } -> do
-                -- Create an object URL from Blob and treat it as done
-                url <- Url.createObjectURL blob
-                HS.notify io.listener (WorkerDone id url)
-              { tag: "error", id, reason } -> HS.notify io.listener (WorkerError id reason)
-              _ -> pure unit
-          -- subscribe emitter to evaluate actions in Halogen
-          _ <- H.subscribe io.emitter
-          H.liftEffect $ W.post worker { id: ix, url: item.url, name: item.name, op: "warp_auto" }
+
+      case st.worker of
+        Nothing -> H.liftEffect $ log "Error: Worker not initialized"
+        Just worker -> do
+          for_ (Array.mapWithIndex Tuple st.uploads) \(Tuple ix item) -> do
+            H.liftEffect $ W.post worker { id: ix, url: item.url, name: item.name, op: "warp_auto" }
           pure unit
-        pure unit
     WorkerProgress _ _ -> pure unit
     WorkerDone index url -> do
-      -- draw into corresponding canvas (by order/index)
       let selector = "#result-canvas-" <> show (index + 1)
       H.liftEffect $ drawImageToCanvas selector url
       H.modify_ \s ->
-        let newPending = if s.pending > 0 then s.pending - 1 else 0
-        in s { pending = newPending, isProcessing = newPending /= 0 }
+        let
+          newPending = if s.pending > 0 then s.pending - 1 else 0
+        in
+          s { pending = newPending, isProcessing = newPending /= 0 }
       pure unit
     WorkerError _ _ -> pure unit
     Navigate r -> H.modify_ \s -> s { route = r }
@@ -163,9 +168,7 @@ component =
       case Array.index st.sources ix of
         Nothing -> pure unit
         Just srcItem -> do
-          -- open modal and request detection
           H.modify_ \s -> s { editing = Just { index: ix, url: srcItem.url, points: [], dragging: Nothing, width: 0, height: 0 } }
-          -- ask worker to detect points
           _ <- HQ.fork do
             worker <- H.liftEffect $ W.spawn "./src/Worker/processor.worker.js"
             io <- H.liftEffect HS.create
@@ -183,7 +186,6 @@ component =
         Nothing -> pure unit
         Just ed | ed.index /= idx -> pure unit
         Just ed -> do
-          -- update editing data and draw base + overlay
           H.modify_ \s -> s { editing = Just ed { width = w, height = h, points = pts } }
           let baseSel = "#editor-base-canvas"
           let overlaySel = "#editor-overlay-canvas"
@@ -197,7 +199,6 @@ component =
       case st.editing of
         Nothing -> pure unit
         Just ed -> do
-          -- send precise warp with current points
           _ <- HQ.fork do
             worker <- H.liftEffect $ W.spawn "./src/Worker/processor.worker.js"
             io <- H.liftEffect HS.create
@@ -212,7 +213,6 @@ component =
             _ <- H.subscribe io.emitter
             H.liftEffect $ W.post worker { id: ed.index, url: ed.url, op: "warp", points: ed.points }
             pure unit
-          -- close modal
           H.modify_ \s -> s { editing = Nothing }
           pure unit
     EditPointerDown ev -> do
@@ -260,7 +260,9 @@ component =
   processFileList :: FileList -> HalogenM State Action () o m Unit
   processFileList fl = do
     let n = length fl
-    let loop i = if i < n then do
+    let
+      loop i =
+        if i < n then do
           case item i fl of
             Nothing -> loop (i + 1)
             Just f -> do
@@ -283,27 +285,27 @@ component =
   renderRoute st = case st.route of
     Home -> renderHome st
     Chat -> HH.div [ HP.class_ (HH.ClassName "center") ]
-              [ HH.div [ HP.class_ (HH.ClassName "card") ]
-                  [ HH.h2_ [ HH.text "Chat" ]
-                  , HH.p_ [ HH.text "Alpha — coming soon" ]
-                  ]
-              ]
+      [ HH.div [ HP.class_ (HH.ClassName "card") ]
+          [ HH.h2_ [ HH.text "Chat" ]
+          , HH.p_ [ HH.text "Alpha — coming soon" ]
+          ]
+      ]
     Tools -> HH.div [ HP.class_ (HH.ClassName "center") ]
-              [ HH.div [ HP.class_ (HH.ClassName "card") ]
-                  [ HH.h2_ [ HH.text "Tools" ]
-                  , HH.p_ [ HH.text "Coming soon" ]
-                  ]
-              ]
+      [ HH.div [ HP.class_ (HH.ClassName "card") ]
+          [ HH.h2_ [ HH.text "Tools" ]
+          , HH.p_ [ HH.text "Coming soon" ]
+          ]
+      ]
     About -> HH.div [ HP.class_ (HH.ClassName "center") ]
-              [ HH.div [ HP.class_ (HH.ClassName "card") ]
-                  [ HH.h2_ [ HH.text "About" ]
-                  , HH.p_ [ HH.text "OpenDocScanner — document scanning & image manipulation." ]
-                  ]
-              ]
+      [ HH.div [ HP.class_ (HH.ClassName "card") ]
+          [ HH.h2_ [ HH.text "About" ]
+          , HH.p_ [ HH.text "OpenDocScanner — document scanning & image manipulation." ]
+          ]
+      ]
 
   renderHome :: forall m1. State -> H.ComponentHTML Action () m1
   renderHome state =
-    HH.div_ 
+    HH.div_
       [ HH.div [ HP.class_ (HH.ClassName "center") ]
           [ HH.div [ HP.class_ (HH.ClassName "card") ]
               [ HH.h2 [ HP.class_ (HH.ClassName "card-title") ]
@@ -325,10 +327,10 @@ component =
                           , HE.onChange FilesChanged
                           ]
                       ]
-          , HH.button
+                  , HH.button
                       [ HP.classes [ HH.ClassName "option-button", HH.ClassName "secondary" ]
                       , HP.disabled state.isProcessing
-              , HE.onClick \_ -> ScanClicked
+                      , HE.onClick \_ -> ScanClicked
                       ]
                       [ HH.div [ HP.class_ (HH.ClassName "option-title") ] [ HH.text "Scan with camera" ]
                       , HH.p [ HP.class_ (HH.ClassName "option-desc") ] [ HH.text "Use your camera to capture a page" ]
@@ -440,22 +442,30 @@ component =
             [ HH.div [ HP.class_ (HH.ClassName "editor-header") ]
                 [ HH.div [ HP.class_ (HH.ClassName "page-number") ] [ HH.text ("Page " <> show (ed.index + 1)) ]
                 , HH.div [ HP.class_ (HH.ClassName "editor-actions") ]
-                    [ HH.button [ HP.classes [ HH.ClassName "process-button", HH.ClassName "small", HH.ClassName "secondary" ]
-                                , HE.onClick \_ -> EditCancel
-                                ] [ HH.text "Cancel" ]
-                    , HH.button [ HP.classes [ HH.ClassName "process-button", HH.ClassName "small" ]
-                                , HE.onClick \_ -> EditProcess
-                                ] [ HH.text "Process" ]
+                    [ HH.button
+                        [ HP.classes [ HH.ClassName "process-button", HH.ClassName "small", HH.ClassName "secondary" ]
+                        , HE.onClick \_ -> EditCancel
+                        ]
+                        [ HH.text "Cancel" ]
+                    , HH.button
+                        [ HP.classes [ HH.ClassName "process-button", HH.ClassName "small" ]
+                        , HE.onClick \_ -> EditProcess
+                        ]
+                        [ HH.text "Process" ]
                     ]
                 ]
             , HH.div [ HP.class_ (HH.ClassName "editor-body") ]
                 [ HH.div [ HP.class_ (HH.ClassName "editor-canvas-wrap") ]
                     [ HH.canvas [ HP.id "editor-base-canvas", HP.class_ (HH.ClassName "edit-base"), HP.width ed.width, HP.height ed.height ]
-                    , HH.canvas [ HP.id "editor-overlay-canvas", HP.class_ (HH.ClassName "edit-overlay"), HP.width ed.width, HP.height ed.height
-                                , HE.onMouseDown EditPointerDown
-                                , HE.onMouseMove EditPointerMove
-                                , HE.onMouseUp EditPointerUp
-                                ]
+                    , HH.canvas
+                        [ HP.id "editor-overlay-canvas"
+                        , HP.class_ (HH.ClassName "edit-overlay")
+                        , HP.width ed.width
+                        , HP.height ed.height
+                        , HE.onMouseDown EditPointerDown
+                        , HE.onMouseMove EditPointerMove
+                        , HE.onMouseUp EditPointerUp
+                        ]
                     ]
                 ]
             ]
@@ -472,6 +482,8 @@ component =
 
   distance :: { x :: Number, y :: Number } -> { x :: Number, y :: Number } -> Number
   distance a b =
-    let dx = a.x - b.x
-        dy = a.y - b.y
-    in sqrt (dx * dx + dy * dy)
+    let
+      dx = a.x - b.x
+      dy = a.y - b.y
+    in
+      sqrt (dx * dx + dy * dy)

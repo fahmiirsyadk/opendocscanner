@@ -1,26 +1,25 @@
 // message protocol: { id, url, name, op?: 'grayscale' | 'warp' | 'passthrough', points?: [...8 points...] }
-let cvReady = false;
-async function ensureCvReady() {
-  if (cvReady) return;
-  try {
-    importScripts('/opencv.js');
-  } catch (err) {
-    console.error('Failed to load opencv.js', err);
-    throw new Error('OpenCV script could not be loaded.');
-  }
+let opencvReadyPromise = null;
 
-  await new Promise((resolve) => {
-    if (typeof cv !== 'undefined' && cv && typeof cv.onRuntimeInitialized === 'function') {
-      const prev = cv.onRuntimeInitialized;
-      cv.onRuntimeInitialized = function() { try { if (typeof prev === 'function') prev(); } catch (_) {} resolve(); };
-    } else {
-      let tries = 0; const t = setInterval(() => {
-        if (typeof cv !== 'undefined' && typeof cv.Mat === 'function') { clearInterval(t); resolve(); }
-        else if (++tries > 300) { clearInterval(t); resolve(); }
-      }, 10);
-    }
-  });
-  cvReady = true;
+async function ensureOpenCVReady() {
+  if (typeof self.cv !== 'undefined' && self.cv && self.cv.Mat) {
+    return;
+  }
+  if (!opencvReadyPromise) {
+    opencvReadyPromise = new Promise((resolve, reject) => {
+      try {
+        importScripts('/opencv.js');
+        if (typeof self.cv === 'undefined') {
+          reject(new Error('Failed to load OpenCV script'));
+          return;
+        }
+        self.cv['onRuntimeInitialized'] = () => resolve();
+      } catch (err) {
+        reject(err);
+      }
+    });
+  }
+  await opencvReadyPromise;
 }
 
 self.distance = function distance(a, b) { return Math.hypot(a.x - b.x, a.y - b.y); };
@@ -32,6 +31,59 @@ function getQuadraticBezierPoint(t, p0, p1, p2) {
            y: uu * p0.y + 2 * u * t * p1.y + tt * p2.y };
 }
 
+async function fetchBitmap(url) {
+  const blob = await fetch(url).then(r => r.blob());
+  return await createImageBitmap(blob);
+}
+
+function imageDataFromBitmap(bitmap) {
+  const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(bitmap, 0, 0);
+  return ctx.getImageData(0, 0, bitmap.width, bitmap.height);
+}
+
+function matFromImageData(imageData) {
+  const mat = new cv.Mat(imageData.height, imageData.width, cv.CV_8UC4);
+  mat.data.set(imageData.data);
+  return mat;
+}
+
+async function blobFromMat(mat) {
+  const outCanvas = new OffscreenCanvas(mat.cols, mat.rows);
+  const outCtx = outCanvas.getContext('2d');
+  const outImageData = new ImageData(new Uint8ClampedArray(mat.data), mat.cols, mat.rows);
+  outCtx.putImageData(outImageData, 0, 0);
+  return await outCanvas.convertToBlob({ type: 'image/png' });
+}
+
+function computeDstSizeFromCorners(tl, tr, br, bl) {
+  const dstW = Math.max(1, Math.round((self.distance(tl, tr) + self.distance(bl, br)) / 2));
+  const dstH = Math.max(1, Math.round((self.distance(tl, bl) + self.distance(tr, br)) / 2));
+  return { dstW, dstH };
+}
+
+function createRemapMaps(dstW, dstH, tl, tr, br, bl, tm, rm, bm, lm) {
+  const map1 = new cv.Mat(dstH, dstW, cv.CV_32FC1);
+  const map2 = new cv.Mat(dstH, dstW, cv.CV_32FC1);
+  const denomW = Math.max(1, dstW - 1);
+  const denomH = Math.max(1, dstH - 1);
+  for (let j = 0; j < dstH; j++) {
+    for (let i = 0; i < dstW; i++) {
+      const u = i / denomW; const v = j / denomH;
+      const top_p = getQuadraticBezierPoint(u, tl, tm, tr);
+      const bottom_p = getQuadraticBezierPoint(u, bl, bm, br);
+      const left_p = getQuadraticBezierPoint(v, tl, lm, bl);
+      const right_p = getQuadraticBezierPoint(v, tr, rm, br);
+      const p1 = { x: (1 - v) * top_p.x + v * bottom_p.x, y: (1 - v) * top_p.y + v * bottom_p.y };
+      const p2 = { x: (1 - u) * left_p.x + u * right_p.x, y: (1 - u) * left_p.y + u * right_p.y };
+      const src_x = (p1.x + p2.x) / 2; const src_y = (p1.y + p2.y) / 2;
+      map1.floatPtr(j, i)[0] = src_x; map2.floatPtr(j, i)[0] = src_y;
+    }
+  }
+  return { map1, map2 };
+}
+
 self.onmessage = async (e) => {
   const { id, url, name, op = 'passthrough', points } = e.data || {};
   try {
@@ -40,31 +92,19 @@ self.onmessage = async (e) => {
       return;
     }
 
+    // Ensure OpenCV is available for all operations that need it
+    await ensureOpenCVReady();
+
     if (op === 'grayscale') {
-      await ensureCvReady();
-      const hasCV = (typeof cv !== 'undefined' && typeof cv.Mat === 'function');
-      if (!hasCV) { self.postMessage({ tag: 'done', id, url, name }); return; }
-
-      const blob = await fetch(url).then(r => r.blob());
-      const bitmap = await createImageBitmap(blob);
-      const srcCanvas = new OffscreenCanvas(bitmap.width, bitmap.height);
-      const srcCtx = srcCanvas.getContext('2d');
-      srcCtx.drawImage(bitmap, 0, 0);
-
-      // Read into cv.Mat using ImageData (cv.imread may not support OffscreenCanvas)
-      const imageData = srcCtx.getImageData(0, 0, bitmap.width, bitmap.height);
-      const src = new cv.Mat(imageData.height, imageData.width, cv.CV_8UC4);
-      src.data.set(imageData.data);
+      const bitmap = await fetchBitmap(url);
+      const imageData = imageDataFromBitmap(bitmap);
+      const src = matFromImageData(imageData);
       const gray = new cv.Mat();
       cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY, 0);
       // Convert back to 4-channel for PNG encoding
       const rgba = new cv.Mat();
       cv.cvtColor(gray, rgba, cv.COLOR_GRAY2RGBA, 0);
-      const outCanvas = new OffscreenCanvas(rgba.cols, rgba.rows);
-      const outCtx = outCanvas.getContext('2d');
-      const outImageData = new ImageData(new Uint8ClampedArray(rgba.data), rgba.cols, rgba.rows);
-      outCtx.putImageData(outImageData, 0, 0);
-      const outBlob = await outCanvas.convertToBlob({ type: 'image/png' });
+      const outBlob = await blobFromMat(rgba);
       // Post Blob directly (structured clone); main will createObjectURL
       self.postMessage({ tag: 'doneBlob', id, name, mime: outBlob.type, blob: outBlob });
       src.delete(); gray.delete(); rgba.delete();
@@ -72,49 +112,18 @@ self.onmessage = async (e) => {
     }
 
     if (op === 'warp' && Array.isArray(points) && points.length === 8) {
-      await ensureCvReady();
-      if (typeof cv === 'undefined' || typeof cv.Mat !== 'function') { self.postMessage({ tag: 'done', id, url, name }); return; }
-
-      const blob = await fetch(url).then(r => r.blob());
-      const bitmap = await createImageBitmap(blob);
-      const srcCanvas = new OffscreenCanvas(bitmap.width, bitmap.height);
-      const ctx = srcCanvas.getContext('2d');
-      ctx.drawImage(bitmap, 0, 0);
-      const imageData = ctx.getImageData(0, 0, bitmap.width, bitmap.height);
-
-      const src = new cv.Mat(imageData.height, imageData.width, cv.CV_8UC4);
-      src.data.set(imageData.data);
+      const bitmap = await fetchBitmap(url);
+      const imageData = imageDataFromBitmap(bitmap);
+      const src = matFromImageData(imageData);
 
       const [tl, tr, br, bl, tm, rm, bm, lm] = points;
-      const dstW = Math.max(1, Math.round((self.distance(tl, tr) + self.distance(bl, br)) / 2));
-      const dstH = Math.max(1, Math.round((self.distance(tl, bl) + self.distance(tr, br)) / 2));
-
-      const map1 = new cv.Mat(dstH, dstW, cv.CV_32FC1);
-      const map2 = new cv.Mat(dstH, dstW, cv.CV_32FC1);
-      const denomW = Math.max(1, dstW - 1); const denomH = Math.max(1, dstH - 1);
-      for (let j = 0; j < dstH; j++) {
-        for (let i = 0; i < dstW; i++) {
-          const u = i / denomW; const v = j / denomH;
-          const top_p = getQuadraticBezierPoint(u, tl, tm, tr);
-          const bottom_p = getQuadraticBezierPoint(u, bl, bm, br);
-          const left_p = getQuadraticBezierPoint(v, tl, lm, bl);
-          const right_p = getQuadraticBezierPoint(v, tr, rm, br);
-          const p1 = { x: (1 - v) * top_p.x + v * bottom_p.x, y: (1 - v) * top_p.y + v * bottom_p.y };
-          const p2 = { x: (1 - u) * left_p.x + u * right_p.x, y: (1 - u) * left_p.y + u * right_p.y };
-          const src_x = (p1.x + p2.x) / 2; const src_y = (p1.y + p2.y) / 2;
-          map1.floatPtr(j, i)[0] = src_x; map2.floatPtr(j, i)[0] = src_y;
-        }
-      }
+      const { dstW, dstH } = computeDstSizeFromCorners(tl, tr, br, bl);
+      const { map1, map2 } = createRemapMaps(dstW, dstH, tl, tr, br, bl, tm, rm, bm, lm);
 
       const dst = new cv.Mat(dstH, dstW, src.type());
       cv.remap(src, dst, map1, map2, cv.INTER_LINEAR, cv.BORDER_REPLICATE);
 
-      // Output as PNG
-      const outCanvas = new OffscreenCanvas(dstW, dstH);
-      const outCtx = outCanvas.getContext('2d');
-      const outImageData = new ImageData(new Uint8ClampedArray(dst.data), dst.cols, dst.rows);
-      outCtx.putImageData(outImageData, 0, 0);
-      const outBlob = await outCanvas.convertToBlob({ type: 'image/png' });
+      const outBlob = await blobFromMat(dst);
       self.postMessage({ tag: 'doneBlob', id, name, mime: outBlob.type, blob: outBlob });
 
       src.delete(); map1.delete(); map2.delete(); dst.delete();
@@ -122,18 +131,9 @@ self.onmessage = async (e) => {
     }
 
     if (op === 'warp_auto' || op === 'detect_corners') {
-      await ensureCvReady();
-      if (typeof cv === 'undefined' || typeof cv.Mat !== 'function') { self.postMessage({ tag: 'done', id, url, name }); return; }
-
-      const blob = await fetch(url).then(r => r.blob());
-      const bitmap = await createImageBitmap(blob);
-      const srcCanvas = new OffscreenCanvas(bitmap.width, bitmap.height);
-      const ctx2d = srcCanvas.getContext('2d');
-      ctx2d.drawImage(bitmap, 0, 0);
-      const imageData = ctx2d.getImageData(0, 0, bitmap.width, bitmap.height);
-
-      const src = new cv.Mat(imageData.height, imageData.width, cv.CV_8UC4);
-      src.data.set(imageData.data);
+      const bitmap = await fetchBitmap(url);
+      const imageData = imageDataFromBitmap(bitmap);
+      const src = matFromImageData(imageData);
 
       // Auto-detect 4 corners using contours
       const gray = new cv.Mat(); const blur = new cv.Mat(); const thresh = new cv.Mat();
@@ -180,25 +180,8 @@ self.onmessage = async (e) => {
         src.delete(); gray.delete(); return;
       }
 
-      const dstW = Math.max(1, Math.round((self.distance(tl, tr) + self.distance(bl, br)) / 2));
-      const dstH = Math.max(1, Math.round((self.distance(tl, bl) + self.distance(tr, br)) / 2));
-
-      const map1 = new cv.Mat(dstH, dstW, cv.CV_32FC1);
-      const map2 = new cv.Mat(dstH, dstW, cv.CV_32FC1);
-      const denomW = Math.max(1, dstW - 1); const denomH = Math.max(1, dstH - 1);
-      for (let j = 0; j < dstH; j++) {
-        for (let i = 0; i < dstW; i++) {
-          const u = i / denomW; const v = j / denomH;
-          const top_p = getQuadraticBezierPoint(u, tl, tm, tr);
-          const bottom_p = getQuadraticBezierPoint(u, bl, bm, br);
-          const left_p = getQuadraticBezierPoint(v, tl, lm, bl);
-          const right_p = getQuadraticBezierPoint(v, tr, rm, br);
-          const p1 = { x: (1 - v) * top_p.x + v * bottom_p.x, y: (1 - v) * top_p.y + v * bottom_p.y };
-          const p2 = { x: (1 - u) * left_p.x + u * right_p.x, y: (1 - u) * left_p.y + u * right_p.y };
-          const src_x = (p1.x + p2.x) / 2; const src_y = (p1.y + p2.y) / 2;
-          map1.floatPtr(j, i)[0] = src_x; map2.floatPtr(j, i)[0] = src_y;
-        }
-      }
+      const { dstW, dstH } = computeDstSizeFromCorners(tl, tr, br, bl);
+      const { map1, map2 } = createRemapMaps(dstW, dstH, tl, tr, br, bl, tm, rm, bm, lm);
 
       const dst = new cv.Mat(dstH, dstW, src.type());
       cv.remap(src, dst, map1, map2, cv.INTER_LINEAR, cv.BORDER_REPLICATE);
@@ -225,22 +208,14 @@ self.onmessage = async (e) => {
           cleanMask.delete();
         }
 
-        const outCanvas = new OffscreenCanvas(dstW, dstH);
-        const outCtx = outCanvas.getContext('2d');
         const outRgba = new cv.Mat();
         cv.cvtColor(output, outRgba, cv.COLOR_RGBA2RGBA, 0);
-        const outImageData = new ImageData(new Uint8ClampedArray(outRgba.data), outRgba.cols, outRgba.rows);
-        outCtx.putImageData(outImageData, 0, 0);
-        const outBlob = await outCanvas.convertToBlob({ type: 'image/png' });
+        const outBlob = await blobFromMat(outRgba);
         self.postMessage({ tag: 'doneBlob', id, name, mime: outBlob.type, blob: outBlob });
         outRgba.delete(); hsv.delete(); channels.delete(); S.delete(); mask.delete(); kernel.delete(); cts.delete(); hier.delete();
       } catch (e) {
         // Fallback: just output dst
-        const outCanvas = new OffscreenCanvas(dstW, dstH);
-        const outCtx = outCanvas.getContext('2d');
-        const outImageData = new ImageData(new Uint8ClampedArray(dst.data), dst.cols, dst.rows);
-        outCtx.putImageData(outImageData, 0, 0);
-        const outBlob = await outCanvas.convertToBlob({ type: 'image/png' });
+        const outBlob = await blobFromMat(dst);
         self.postMessage({ tag: 'doneBlob', id, name, mime: outBlob.type, blob: outBlob });
       }
 
